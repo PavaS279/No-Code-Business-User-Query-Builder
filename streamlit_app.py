@@ -4,10 +4,12 @@ import pandas as pd
 from math import pi
 
 # --- Snowflake Connection Configuration ---
+# Uncomment and configure below for Snowflake
 # cnx = st.connection("snowflake")
 # session = cnx.session()
 
 def call_snowflake_procedure(prompt):
+    # Replace with active Snowflake session logic
     conn = session
     try:
         cursor = conn.cursor()
@@ -19,13 +21,13 @@ def call_snowflake_procedure(prompt):
     finally:
         cursor.close()
 
-# --- Chat State ---
+# --- Chat State Initialization ---
 if "chat_open" not in st.session_state:
     st.session_state.chat_open = False
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
 
-# --- Floating Chat Icon ---
+# --- Floating Chat Icon HTML/JS ---
 chat_icon_html = """
 <style>
 #chat-fab {
@@ -44,24 +46,17 @@ chat_icon_html = """
     z-index: 9999;
 }
 </style>
-<div id="chat-fab" onclick="fetch('/?chat_toggle=true')">💬</div>
-<script>
-const fab = window.parent.document.getElementById('chat-fab');
-if (fab) {
-    fab.onclick = function() {
-        window.location.href = window.location.href + "&chat_toggle=true";
-    };
-}
-</script>
+<div id="chat-fab" onclick="window.location.search += '&chat_toggle=true';">💬</div>
 """
 st.markdown(chat_icon_html, unsafe_allow_html=True)
 
-# --- Toggle Chat Box on Click ---
-if st.query_params.get("chat_toggle"):
+# --- Toggle Chat Based on URL Param ---
+params = st.query_params
+if params.get("chat_toggle"):
     st.session_state.chat_open = not st.session_state.chat_open
-    st.query_params  # Clear toggle
+    # Note: st.query_params is read-only, no API to remove it currently
 
-# --- Render Chat Box if Open ---
+# --- Render Chat Box if Toggled Open ---
 if st.session_state.chat_open:
     st.markdown("""
         <style>
@@ -92,12 +87,13 @@ if st.session_state.chat_open:
         label = "🧑 You" if speaker == "User" else "🤖 Bot"
         st.markdown(f"**{label}:** {message}")
 
-    # Input and send
+    # Chat input and processing
     with st.form("chat_form", clear_on_submit=True):
         user_input = st.text_input("Your message", key="chat_input")
         submitted = st.form_submit_button("Send")
         if submitted and user_input.strip():
             st.session_state.chat_history.append(("User", user_input))
+            # --- Call Snowflake procedure here ---
             response = call_snowflake_procedure(user_input)
             st.session_state.chat_history.append(("Bot", response))
 
