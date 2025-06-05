@@ -4,8 +4,8 @@ import pandas as pd
 from math import pi
 
 # --- Snowflake Connection Configuration ---
-cnx = st.connection("snowflake")
-session = cnx.session()
+# cnx = st.connection("snowflake")
+# session = cnx.session()
 
 def call_snowflake_procedure(prompt):
     conn = session
