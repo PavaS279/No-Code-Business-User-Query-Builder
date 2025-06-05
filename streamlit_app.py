@@ -57,9 +57,9 @@ if (fab) {
 st.markdown(chat_icon_html, unsafe_allow_html=True)
 
 # --- Toggle Chat Box on Click ---
-if st.experimental_get_query_params().get("chat_toggle"):
+if st.query_params().get("chat_toggle"):
     st.session_state.chat_open = not st.session_state.chat_open
-    st.experimental_set_query_params()  # Clear toggle
+    st.query_params()  # Clear toggle
 
 # --- Render Chat Box if Open ---
 if st.session_state.chat_open:
