@@ -1,7 +1,7 @@
 import streamlit as st
 
 # --- Title ---
-st.title("NLP-Based Dashboard with Unified ERP Data")
+st.title("NLP-Based Dashboard with Unified ERP Data s")
 
 # --- Connect to Snowflake (Uncomment and configure when ready) ---
 cnx = st.connection("snowflake")
