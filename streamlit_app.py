@@ -1,34 +1,21 @@
 import streamlit as st
-import numpy as np
-import pandas as pd
-from math import pi
 
-# --- Snowflake Connection Configuration ---
-# Uncomment and configure below for Snowflake
-# cnx = st.connection("snowflake")
-# session = cnx.session()
+# --- Heading ---
+st.title("NLP-Based Dashboard with Unified ERP Data")
 
+# --- Snowflake Procedure Call (Placeholder) ---
 def call_snowflake_procedure(prompt):
-    # Replace with active Snowflake session logic
-    conn = session
-    try:
-        cursor = conn.cursor()
-        cursor.execute(f"CALL CALL_CHATBOT_PROC('{prompt}')")
-        result = cursor.fetchone()
-        return result[0] if result else "No response from procedure."
-    except Exception as e:
-        return f"Error: {e}"
-    finally:
-        cursor.close()
+    # Replace this with actual Snowflake session call
+    return f"Echo from Snowflake procedure: '{prompt}'"
 
-# --- Chat State Initialization ---
+# --- Initialize Chatbot State ---
 if "chat_open" not in st.session_state:
     st.session_state.chat_open = False
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
 
-# --- Floating Chat Icon HTML/JS ---
-chat_icon_html = """
+# --- Floating Chat Button (bottom-right) ---
+chat_button_style = """
 <style>
 #chat-fab {
     position: fixed;
@@ -46,17 +33,34 @@ chat_icon_html = """
     z-index: 9999;
 }
 </style>
-<div id="chat-fab" onclick="window.location.search += '&chat_toggle=true';">💬</div>
+<button id="chat-fab" onclick="fetch('/_toggle_chat')">💬</button>
 """
-st.markdown(chat_icon_html, unsafe_allow_html=True)
 
-# --- Toggle Chat Based on URL Param ---
-params = st.query_params
-if params.get("chat_toggle"):
+st.markdown(chat_button_style, unsafe_allow_html=True)
+
+# --- JavaScript to Send Toggle Event to Streamlit ---
+toggle_script = """
+<script>
+const chatButton = window.parent.document.getElementById('chat-fab');
+if (chatButton) {
+    chatButton.addEventListener("click", () => {
+        fetch(window.location.href, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ "toggle_chat": true })
+        }).then(() => {
+            window.location.reload();
+        });
+    });
+</script>
+"""
+st.markdown(toggle_script, unsafe_allow_html=True)
+
+# --- Workaround: Add Manual Toggle in UI for Fallback ---
+if st.button("Toggle Chat (for testing without JS)"):
     st.session_state.chat_open = not st.session_state.chat_open
-    # Note: st.query_params is read-only, no API to remove it currently
 
-# --- Render Chat Box if Toggled Open ---
+# --- Render Chat Box ---
 if st.session_state.chat_open:
     st.markdown("""
         <style>
@@ -73,27 +77,21 @@ if st.session_state.chat_open:
             overflow-y: auto;
             z-index: 9999;
         }
-        .chat-input {
-            width: calc(100% - 10px);
-            padding: 5px;
-            margin-top: 10px;
-        }
         </style>
         <div class="chat-box">
     """, unsafe_allow_html=True)
 
-    # Display chat history
+    # Display Chat History
     for speaker, message in st.session_state.chat_history:
         label = "🧑 You" if speaker == "User" else "🤖 Bot"
         st.markdown(f"**{label}:** {message}")
 
-    # Chat input and processing
+    # Input Form
     with st.form("chat_form", clear_on_submit=True):
         user_input = st.text_input("Your message", key="chat_input")
         submitted = st.form_submit_button("Send")
         if submitted and user_input.strip():
             st.session_state.chat_history.append(("User", user_input))
-            # --- Call Snowflake procedure here ---
             response = call_snowflake_procedure(user_input)
             st.session_state.chat_history.append(("Bot", response))
 
