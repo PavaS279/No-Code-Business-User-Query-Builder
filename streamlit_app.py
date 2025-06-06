@@ -21,6 +21,21 @@ def get_signed_metabase_url():
     iframe_url = f"{METABASE_SITE_URL}/embed/dashboard/{token}?bordered=true&titled=true"
     return iframe_url
 
+# def get_signed_rocketchat_url():
+#     METABASE_SITE_URL = "http://34.207.232.170:3000"
+#     METABASE_SECRET_KEY = "0187202d69e5a05cc28bd8639f73d6482678b737fe4b5e10a28622d94de1f4"  # Replace with your actual secret
+
+#     payload = {
+#         "resource": {"dashboard": 2},  # Replace with your actual dashboard ID
+#         "params": {},
+#         "exp": round(time.time()) + (10 * 60)  # 10 minutes expiry
+#     }
+
+#     token = jwt.encode(payload, METABASE_SECRET_KEY, algorithm="HS256")
+#     iframe_url = f"{METABASE_SITE_URL}/embed/dashboard/{token}?bordered=true&titled=true"
+#     return iframe_url
+
+
 # --- Render Metabase Iframe ---
 iframe_url = get_signed_metabase_url()
 st.markdown(f"""
@@ -32,6 +47,15 @@ st.markdown(f"""
     </iframe>
 """, unsafe_allow_html=True)
 
+iframe_url = 'http://98.85.30.170'
+st.markdown(f"""
+    <iframe src="{iframe_url}"
+            frameborder="0"
+            width="100%"
+            height="600"
+            allowtransparency="true">
+    </iframe>
+""", unsafe_allow_html=True)
 
 # --- Chat UI State ---
 if "chat_open" not in st.session_state:
