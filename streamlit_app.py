@@ -1,29 +1,30 @@
 import streamlit as st
 import requests
 
-# --- Page Setup ---
-st.set_page_config(layout="wide")
+# --- Title ---
 st.title("NLP-Based Dashboard with Unified ERP Data")
-
-# --- Layout with Embedded Metabase and Chat ---
-col1, col2 = st.columns([3, 1])
-
-with col1:
-    st.markdown("""
-        <iframe 
-            src="http://44.197.151.60:3000" 
-            width="100%" 
-            height="800" 
-            frameborder="0"
-            allowfullscreen
-        ></iframe>
-    """, unsafe_allow_html=True)
 
 # --- Chat UI State ---
 if "chat_open" not in st.session_state:
     st.session_state.chat_open = False
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
+
+# --- Metabase Embed ---
+st.markdown("""
+    <style>
+    .metabase-container {
+        width: 70%;
+        height: 600px;
+        display: inline-block;
+    }
+    </style>
+    <div class="metabase-container">
+        <iframe src="http://44.197.151.60:3000/embed/dashboard/your_dashboard_id#bordered=false&theme=night"
+                frameborder="0" width="100%" height="100%">
+        </iframe>
+    </div>
+""", unsafe_allow_html=True)
 
 # --- Chat Icon (Floating) ---
 chat_icon_html = """
@@ -59,14 +60,29 @@ document.getElementById("chat-toggle-btn").onclick = function() {
 """
 st.markdown(chat_icon_html, unsafe_allow_html=True)
 
-# --- Dev Fallback Button (optional for local testing) ---
+# --- Server-side Toggle Fallback ---
 if st.button("Open Chat (Dev fallback)"):
     st.session_state.chat_open = not st.session_state.chat_open
 
-# --- JS Toggle Chat Handler ---
+# --- Handle Toggle from JS (if any) ---
 if "toggle_chat" in st.session_state:
     st.session_state.chat_open = not st.session_state.chat_open
     del st.session_state["toggle_chat"]
+
+# --- Function to Send Data to Webhook ---
+def send_to_webhook(question):
+    webhook_url = "https://13.218.21.136:5678/webhook-test/806f1553-6b37-4189-94cb-1c4caa1cdbd8"
+    payload = {"question": question}
+    headers = {"Content-Type": "application/json"}
+    
+    try:
+        response = requests.post(webhook_url, json=payload, headers=headers, timeout=10)
+        if response.status_code == 200:
+            return response.json().get("response", "No response from Webhook.")
+        else:
+            return f"Error: {response.status_code}"
+    except Exception as e:
+        return f"Error sending to Webhook: {e}"
 
 # --- Render Chat Box ---
 if st.session_state.chat_open:
@@ -90,31 +106,20 @@ if st.session_state.chat_open:
         <div class="chat-box">
     """, unsafe_allow_html=True)
 
+    # Display History
     for sender, msg in st.session_state.chat_history:
         label = "🧑 You" if sender == "User" else "🤖 Bot"
         st.markdown(f"**{label}:** {msg}")
 
+    # Input Form
     with st.form("chat_form", clear_on_submit=True):
         user_input = st.text_input("Type your question", key="chat_input")
         submitted = st.form_submit_button("Send")
         if submitted and user_input.strip():
             st.session_state.chat_history.append(("User", user_input))
-
-            # --- Send message to webhook ---
-            try:
-                response = requests.post(
-                    "https://13.218.21.136:5678/webhook-test/806f1553-6b37-4189-94cb-1c4caa1cdbd8",
-                    json={"question": user_input},
-                    timeout=5,
-                    verify=False  # For self-signed certs; remove in prod
-                )
-                if response.ok:
-                    reply = response.text
-                else:
-                    reply = f"Webhook error: {response.status_code}"
-            except Exception as e:
-                reply = f"Error: {e}"
-
-            st.session_state.chat_history.append(("Bot", reply))
+            
+            # Send question to Webhook
+            response = send_to_webhook(user_input)
+            st.session_state.chat_history.append(("Bot", response))
 
     st.markdown("</div>", unsafe_allow_html=True)
