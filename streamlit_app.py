@@ -1,25 +1,23 @@
 import streamlit as st
+import requests
 
-# --- Title ---
-st.title("NLP-Based Dashboard with Unified ERP Data s")
+# --- Page Setup ---
+st.set_page_config(layout="wide")
+st.title("NLP-Based Dashboard with Unified ERP Data")
 
-# --- Connect to Snowflake (Uncomment and configure when ready) ---
-cnx = st.connection("snowflake")
-session = cnx.session()
+# --- Layout with Embedded Metabase and Chat ---
+col1, col2 = st.columns([3, 1])
 
-# --- Snowflake Call Logic ---
-def call_snowflake_procedure(prompt):
-    try:
-        # Replace with actual Snowflake execution
-        cursor = session.cursor()
-        cursor.execute(f"CALL CORTEX_ANALYST_COMPLEX.SALESFORCEDB.GET_SQL_FROM_QUESTION_PIN('{prompt}')")
-        result = cursor.fetchone()
-        return result[0] if result else "No response from procedure."
-        # return f"🧠 Simulated SQL from: {prompt}"  # Placeholder
-    except Exception as e:
-        return f"Error: {e}"
-    # finally:
-    #     cursor.close()
+with col1:
+    st.markdown("""
+        <iframe 
+            src="http://44.197.151.60:3000" 
+            width="100%" 
+            height="800" 
+            frameborder="0"
+            allowfullscreen
+        ></iframe>
+    """, unsafe_allow_html=True)
 
 # --- Chat UI State ---
 if "chat_open" not in st.session_state:
@@ -61,11 +59,11 @@ document.getElementById("chat-toggle-btn").onclick = function() {
 """
 st.markdown(chat_icon_html, unsafe_allow_html=True)
 
-# --- Server-side Toggle Fallback ---
+# --- Dev Fallback Button (optional for local testing) ---
 if st.button("Open Chat (Dev fallback)"):
     st.session_state.chat_open = not st.session_state.chat_open
 
-# --- Handle Toggle from JS (if any) ---
+# --- JS Toggle Chat Handler ---
 if "toggle_chat" in st.session_state:
     st.session_state.chat_open = not st.session_state.chat_open
     del st.session_state["toggle_chat"]
@@ -92,18 +90,31 @@ if st.session_state.chat_open:
         <div class="chat-box">
     """, unsafe_allow_html=True)
 
-    # Display History
     for sender, msg in st.session_state.chat_history:
         label = "🧑 You" if sender == "User" else "🤖 Bot"
         st.markdown(f"**{label}:** {msg}")
 
-    # Input Form
     with st.form("chat_form", clear_on_submit=True):
         user_input = st.text_input("Type your question", key="chat_input")
         submitted = st.form_submit_button("Send")
         if submitted and user_input.strip():
             st.session_state.chat_history.append(("User", user_input))
-            response = call_snowflake_procedure(user_input)
-            st.session_state.chat_history.append(("Bot", response))
+
+            # --- Send message to webhook ---
+            try:
+                response = requests.post(
+                    "https://13.218.21.136:5678/webhook-test/806f1553-6b37-4189-94cb-1c4caa1cdbd8",
+                    json={"question": user_input},
+                    timeout=5,
+                    verify=False  # For self-signed certs; remove in prod
+                )
+                if response.ok:
+                    reply = response.text
+                else:
+                    reply = f"Webhook error: {response.status_code}"
+            except Exception as e:
+                reply = f"Error: {e}"
+
+            st.session_state.chat_history.append(("Bot", reply))
 
     st.markdown("</div>", unsafe_allow_html=True)
