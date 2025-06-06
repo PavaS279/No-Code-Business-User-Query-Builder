@@ -112,7 +112,7 @@ if st.session_state.chat_open:
             st.session_state.chat_history.append(("User", user_input))
 
             # Send to Webhook
-            webhook_url = "https://13.218.21.136:5678/webhook-test/806f1553-6b37-4189-94cb-1c4caa1cdbd8"
+            webhook_url = "https://webhook.site/15b901ff-3cda-48a3-9659-17eaff43ac28"
             try:
                 response = requests.post(webhook_url, json={"message": user_input}, timeout=10, verify=False)
                 bot_response = response.text if response.ok else f"Webhook error: {response.status_code}"
