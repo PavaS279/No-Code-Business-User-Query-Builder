@@ -8,8 +8,8 @@ st.title("NLP-Based Dashboard with Unified ERP Data")
 
 # --- JWT Metabase Embed Generation ---
 def get_signed_metabase_url():
-    METABASE_SITE_URL = "http://34.207.232.170:3000"
-    METABASE_SECRET_KEY = "0187202d69e5a05cc28bd8639f73d6482678b737fe4b5e10a28622d94de1f4"  # Replace with your actual secret
+    METABASE_SITE_URL = "https://swift-barb.metabaseapp.com/public/dashboard/3684da17-150a-4b59-a8b8-da220729c0fc"
+    METABASE_SECRET_KEY = "mb_OkwqioX3KW4CDFaAkLY3r+9iwQQiBhAOY3tYMvagWW4="  # Replace with your actual secret
 
     payload = {
         "resource": {"dashboard": 2},  # Replace with your actual dashboard ID
