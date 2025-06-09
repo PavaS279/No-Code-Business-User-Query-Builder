@@ -3,40 +3,30 @@ import jwt
 import time
 import requests
 
-# --- Title ---
-st.title("NLP-Based Dashboard with Unified ERP Data")
+# --- Configuration ---
+METABASE_PUBLIC_DASHBOARD = "https://swift-barb.metabaseapp.com/public/dashboard/3684da17-150a-4b59-a8b8-da220729c0fc"
+METABASE_SECRET_KEY = "mb_OkwqioX3KW4CDFaAkLY3r+9iwQQiBhAOY3tYMvagWW4="
+CHAT_WEBHOOK_URL = "https://manually-cunning-bluejay.ngrok-free.app/webhook-test/2b3514c4-bf88-4f79-83a8-c0d19381cab0"
 
-# --- JWT Metabase Embed Generation ---
+# --- JWT Token Generation for Embedded Dashboard ---
 def get_signed_metabase_url():
-    METABASE_SITE_URL = "https://swift-barb.metabaseapp.com/public/dashboard/3684da17-150a-4b59-a8b8-da220729c0fc"
-    METABASE_SECRET_KEY = "mb_OkwqioX3KW4CDFaAkLY3r+9iwQQiBhAOY3tYMvagWW4="  # Replace with your actual secret
-
     payload = {
-        "resource": {"dashboard": 2},  # Replace with your actual dashboard ID
+        "resource": {"dashboard": 2},
         "params": {},
-        "exp": round(time.time()) + (10 * 60)  # 10 minutes expiry
+        "exp": round(time.time()) + (10 * 60)
     }
-
     token = jwt.encode(payload, METABASE_SECRET_KEY, algorithm="HS256")
-    iframe_url = f"{METABASE_SITE_URL}/embed/dashboard/{token}?bordered=true&titled=true"
+    iframe_url = f"{METABASE_PUBLIC_DASHBOARD}/embed/dashboard/{token}?bordered=true&titled=true&reload={int(time.time())}"
     return iframe_url
 
-# def get_signed_rocketchat_url():
-#     METABASE_SITE_URL = "http://34.207.232.170:3000"
-#     METABASE_SECRET_KEY = "0187202d69e5a05cc28bd8639f73d6482678b737fe4b5e10a28622d94de1f4"  # Replace with your actual secret
+# --- Page Configuration ---
+st.set_page_config(page_title="ERP NLP Dashboard", layout="wide")
+st.markdown("<style>footer {visibility: hidden;}</style>", unsafe_allow_html=True)
 
-#     payload = {
-#         "resource": {"dashboard": 2},  # Replace with your actual dashboard ID
-#         "params": {},
-#         "exp": round(time.time()) + (10 * 60)  # 10 minutes expiry
-#     }
-
-#     token = jwt.encode(payload, METABASE_SECRET_KEY, algorithm="HS256")
-#     iframe_url = f"{METABASE_SITE_URL}/embed/dashboard/{token}?bordered=true&titled=true"
-#     return iframe_url
-
-
-# --- Render Metabase Iframe ---
+# --- Dashboard Embed with Refresh Button ---
+st.title("📊 Unified ERP Dashboard")
+if st.button("🔄 Refresh Dashboard"):
+    st.session_state["dashboard_reload"] = int(time.time())
 iframe_url = get_signed_metabase_url()
 st.markdown(f"""
     <iframe src="{iframe_url}"
@@ -47,30 +37,22 @@ st.markdown(f"""
     </iframe>
 """, unsafe_allow_html=True)
 
-iframe_url = 'http://98.85.30.170'
-st.markdown(f"""
-    <iframe src="{iframe_url}"
-            frameborder="0"
-            width="100%"
-            height="600"
-            allowtransparency="true">
-    </iframe>
-""", unsafe_allow_html=True)
-
-# --- Chat UI State ---
+# --- Chat State Management ---
 if "chat_open" not in st.session_state:
     st.session_state.chat_open = False
 if "chat_history" not in st.session_state:
-    st.session_state.chat_history = []
+    st.session_state.chat_history = [
+        ("Bot", 'Click on the "Refresh Dashboard" button to update and view the latest data in your dashboard.')
+    ]
 
 # --- Floating Chat Icon ---
-chat_icon_html = """
+chat_toggle_html = """
 <style>
 #chat-toggle-btn {
     position: fixed;
     bottom: 20px;
     right: 20px;
-    background-color: #0e76a8;
+    background-color: #0084ff;
     color: white;
     border-radius: 50%;
     width: 60px;
@@ -85,20 +67,18 @@ chat_icon_html = """
 <div id="chat-toggle-btn">💬</div>
 <script>
 document.getElementById("chat-toggle-btn").onclick = function() {
-    fetch("/", {
+    fetch(window.location.href, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ "toggle_chat": true })
-    }).then(() => {
-        window.location.reload();
-    });
+    }).then(() => window.location.reload());
 };
 </script>
 """
-st.markdown(chat_icon_html, unsafe_allow_html=True)
+st.markdown(chat_toggle_html, unsafe_allow_html=True)
 
-# --- Fallback Toggle Button (for development use only) ---
-if st.button("Open Chat (Dev fallback)"):
+# --- Dev Toggle ---
+if st.button("Toggle Chat (Dev)"):
     st.session_state.chat_open = not st.session_state.chat_open
 
 # --- Render Chat Box ---
@@ -107,17 +87,17 @@ if st.session_state.chat_open:
         <style>
         .chat-box {
             position: fixed;
-            bottom: 90px;
+            bottom: 100px;
             right: 20px;
             width: 350px;
-            max-height: 400px;
-            background-color: #ffffff;
+            max-height: 450px;
+            background-color: white;
             border: 1px solid #ccc;
             border-radius: 10px;
             padding: 15px;
             overflow-y: auto;
             z-index: 9999;
-            box-shadow: 0 2px 12px rgba(0,0,0,0.2);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
         }
         </style>
         <div class="chat-box">
@@ -125,24 +105,28 @@ if st.session_state.chat_open:
 
     # Chat History
     for sender, msg in st.session_state.chat_history:
-        label = "🧑 You" if sender == "User" else "🤖 Bot"
-        st.markdown(f"**{label}:** {msg}")
+        prefix = "🧑 You" if sender == "User" else "🤖 Bot"
+        st.markdown(f"**{prefix}:** {msg}")
 
     # Chat Input
     with st.form("chat_form", clear_on_submit=True):
-        user_input = st.text_input("Type your question", key="chat_input")
-        submitted = st.form_submit_button("Send")
-        if submitted and user_input.strip():
-            st.session_state.chat_history.append(("User", user_input))
-
-            # Send to Webhook
-            webhook_url = "https://webhook.site/15b901ff-3cda-48a3-9659-17eaff43ac28"
+        chat_input = st.text_input("Type your message...", key="chat_input")
+        sent = st.form_submit_button("Send")
+        if sent and chat_input.strip():
+            st.session_state.chat_history.append(("User", chat_input))
             try:
-                response = requests.post(webhook_url, json={"message": user_input}, timeout=10, verify=False)
-                bot_response = response.text if response.ok else f"Webhook error: {response.status_code}"
+                resp = requests.post(
+                    CHAT_WEBHOOK_URL,
+                    json={"prompt": chat_input},
+                    timeout=10
+                )
+                if resp.ok:
+                    reply = "✅ Message successfully sent to backend."
+                else:
+                    reply = "⚠️ Backend responded with an error."
             except Exception as e:
-                bot_response = f"Exception: {str(e)}"
+                reply = f"❌ Failed to send message: {str(e)}"
 
-            st.session_state.chat_history.append(("Bot", bot_response))
+            st.session_state.chat_history.append(("Bot", reply))
 
     st.markdown("</div>", unsafe_allow_html=True)
