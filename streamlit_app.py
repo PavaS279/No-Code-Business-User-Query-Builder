@@ -68,7 +68,7 @@ if (btn) {
 """, unsafe_allow_html=True)
 
 # --- Detect URL Query for Chat Toggle ---
-query_params = st.experimental_get_query_params()
+query_params = st.query_params
 if "chat" in query_params:
     st.session_state.chat_open = not st.session_state.chat_open
 
