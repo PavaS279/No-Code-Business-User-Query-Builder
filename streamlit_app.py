@@ -4,6 +4,7 @@ from typing import Union
 import pandas as pd
 import altair as alt
 import uuid
+import hashlib
 
 # Ensure page config and session initialization happens before anything else
 st.set_page_config(page_title="Cortex Analyst", page_icon="🧠", layout="wide")
@@ -51,27 +52,35 @@ def call_dremio_data_procedure(sql_statement):
     except Exception as e:
         return None, f"Dremio Error: {str(e)}"
 
-def display_chat_message(role, content):
+def display_chat_message(role, content, message_index=None):
     with st.chat_message(role):
-        if isinstance(content, dict) and content.get("type") == "result":
-            df = pd.DataFrame(content.get("data"))
-            sql = content.get("sql")
-            st.markdown("**Generated SQL:**")
-            st.code(sql, language="sql")
-            if not df.empty:
-                st.success("✅ Dremio executed successfully")
-                tab1, tab2 = st.tabs(["Data 📄", "Chart 📉"])
-                with tab1:
-                    st.dataframe(df, use_container_width=True)
-                with tab2:
-                    unique_key = str(uuid.uuid4())[:8]  # generates unique 8-char key
-                    display_charts_tab(df, unique_key)
-            else:
-                st.warning("⚠️ No data returned from Dremio.")
+        if isinstance(content, str):
+            st.markdown(content)
+        elif isinstance(content, dict):
+            if content.get("type") == "text":
+                st.markdown(content.get("value"))
 
-import altair as alt
-import pandas as pd
-import streamlit as st
+            elif content.get("type") == "sql":
+                st.code(content.get("value"), language="sql")
+
+            elif content.get("type") == "result":
+                df = pd.DataFrame(content.get("data"))
+                sql = content.get("sql")
+
+                st.markdown("**Generated SQL:**")
+                st.code(sql, language="sql")
+
+                if not df.empty:
+                    st.success("✅ Dremio executed successfully")
+                    tab1, tab2 = st.tabs(["Data 📄", "Chart 📉"])
+                    with tab1:
+                        st.dataframe(df, use_container_width=True)
+                    with tab2:
+                        # Use a stable hash from SQL statement as key
+                        sql_hash = hashlib.md5(sql.encode()).hexdigest()[:8]
+                        display_charts_tab(df, sql_hash)
+                else:
+                    st.warning("⚠️ No data returned from Dremio.")
 
 def display_charts_tab(df: pd.DataFrame, key_suffix: str) -> None:
     """
