@@ -4,6 +4,9 @@ from typing import Union
 import pandas as pd
 import altair as alt
 
+# Ensure page config and session initialization happens before anything else
+st.set_page_config(page_title="Cortex Analyst", page_icon="🧠", layout="wide")
+
 cnx = st.connection("snowflake")
 session = cnx.session()
 
@@ -25,12 +28,14 @@ def initialize_session():
         st.session_state.processing = False
     if "dataframes" not in st.session_state:
         st.session_state.dataframes = []
+    if "initialized" not in st.session_state:
+        st.session_state.initialized = True
+        st.rerun()
 
 def call_cortex_analyst_procedure(messages):
     try:
         messages_json = json.dumps(messages)
         result = session.call(CHAT_PROCEDURE, messages_json, SEMANTIC_MODEL_PATH)
-        st.write("📩 Raw response from Cortex:", result)
         if not result:
             return None, "No response from procedure"
         procedure_response = json.loads(result)
@@ -184,13 +189,11 @@ def process_user_question(question):
             if dremio_error:
                 raise Exception(f"❌ Dremio execution failed: {dremio_error}")
 
-            # Append analyst response
             st.session_state.messages.append({
                 "role": "analyst",
                 "content": content_block
             })
 
-            # Store full output
             st.session_state.display_messages.append({
                 "role": "assistant",
                 "content": {
@@ -214,23 +217,12 @@ def render_chat_interface():
     st.title("🧠 NLP-Bashboards with Unified ERP Data")
     st.caption("Ask natural questions. Get Bashboards + Unified ERP Data results.")
 
-    # ✅ Ensure session state exists before using it
-    if "display_messages" not in st.session_state:
-        st.session_state.display_messages = []
-
     for msg in st.session_state.display_messages:
         display_chat_message(msg["role"], msg["content"])
 
     if prompt := st.chat_input("Ask something...", disabled=st.session_state.processing):
         process_user_question(prompt)
 
-
-def main():
-    st.set_page_config(page_title="Cortex Analyst", page_icon="🧠", layout="wide")
-    
-    initialize_session()
-    
-    render_chat_interface()
-
-if __name__ == "__main__":
-    main()
+# Entry point
+initialize_session()
+render_chat_interface()
