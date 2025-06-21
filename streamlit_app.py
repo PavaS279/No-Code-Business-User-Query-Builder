@@ -25,8 +25,6 @@ def initialize_session():
         st.session_state.processing = False
     if "dataframes" not in st.session_state:
         st.session_state.dataframes = []
-    if "display_charts" not in st.session_state:
-        st.session_state.display_charts = []
 
 def call_cortex_analyst_procedure(messages):
     try:
@@ -56,10 +54,24 @@ def display_chat_message(role, content):
         if isinstance(content, str):
             st.markdown(content)
         elif isinstance(content, dict):
-            if "message" in content:
-                st.markdown(content["message"])
-            if "query" in content:
-                st.code(content["query"], language="sql")
+            if content.get("type") == "text":
+                st.markdown(content.get("value"))
+            elif content.get("type") == "sql":
+                st.code(content.get("value"), language="sql")
+            elif content.get("type") == "result":
+                df = pd.DataFrame(content.get("data"))
+                sql = content.get("sql")
+                st.markdown("**Generated SQL:**")
+                st.code(sql, language="sql")
+                if not df.empty:
+                    st.success("✅ Dremio executed successfully")
+                    tab1, tab2 = st.tabs(["Data 📄", "Chart 📉"])
+                    with tab1:
+                        st.dataframe(df, use_container_width=True)
+                    with tab2:
+                        display_charts_tab(df, len(st.session_state.dataframes))
+                else:
+                    st.warning("⚠️ No data returned from Dremio.")
 
 def display_charts_tab(df: pd.DataFrame, message_index: int) -> None:
     if len(df.columns) >= 2:
@@ -132,8 +144,10 @@ def process_user_question(question):
 
         user_msg = {"role": "user", "content": [{"type": "text", "text": question}]}
         st.session_state.messages.append(user_msg)
-        st.session_state.display_messages.append({"role": "user", "content": question})
-        display_chat_message("user", question)
+        st.session_state.display_messages.append({"role": "user", "content": {"type": "text", "value": question}})
+
+        with st.chat_message("user"):
+            st.markdown(question)
 
         with st.spinner("Analyzing your question..."):
             response, error = call_cortex_analyst_procedure(st.session_state.messages)
@@ -161,27 +175,20 @@ def process_user_question(question):
             analyst_msg = {"role": "analyst", "content": content_block}
             st.session_state.messages.append(analyst_msg)
 
-            assistant_display = f"{explanation}\n\n**Generated SQL:**\n```sql\n{sql_statement}\n```\n\n✅ Executed in Dremio."
-            st.session_state.display_messages.append({"role": "assistant", "content": assistant_display})
-
-            with st.chat_message("assistant"):
-                st.markdown(explanation)
-                st.code(sql_statement, language="sql")
-                if dremio_result is not None and not dremio_result.empty:
-                    st.success("✅ Dremio executed successfully")
-                    tab1, tab2 = st.tabs(["Data 📄", "Chart 📉"])
-                    with tab1:
-                        st.dataframe(dremio_result, use_container_width=True)
-                    with tab2:
-                        display_charts_tab(dremio_result, len(st.session_state.dataframes))
-                    st.session_state.dataframes.append(dremio_result)
-                else:
-                    st.warning("⚠️ No data returned from Dremio.")
+            # persist result
+            st.session_state.display_messages.append({
+                "role": "assistant",
+                "content": {
+                    "type": "result",
+                    "sql": sql_statement,
+                    "data": dremio_result.to_dict(orient="records")
+                }
+            })
 
     except Exception as e:
         error_msg = f"❌ Error: {str(e)}"
         st.error(error_msg)
-        st.session_state.display_messages.append({"role": "assistant", "content": error_msg})
+        st.session_state.display_messages.append({"role": "assistant", "content": {"type": "text", "value": error_msg}})
     finally:
         st.session_state.processing = False
 
