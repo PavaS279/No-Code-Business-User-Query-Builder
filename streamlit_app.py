@@ -31,7 +31,7 @@ def initialize_session():
     if "initialized" not in st.session_state:
         st.session_state.initialized = True
         st.rerun()
-
+# yy
 def call_cortex_analyst_procedure(messages):
     try:
         messages_json = json.dumps(messages)
