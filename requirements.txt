@@ -3,3 +3,4 @@ snowflake-snowpark-python
 pandas
 pyyaml
 altair
+pyarrow<19.0.0
