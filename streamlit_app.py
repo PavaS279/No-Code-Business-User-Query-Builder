@@ -1,71 +1,171 @@
+import json
 import streamlit as st
-import requests
-import time
+# from snowflake.snowpark.context import get_active_session
+# from snowflake.snowpark.exceptions import SnowparkSQLException
+cnx = st.connection("snowflake")
+session = cnx.session()
+# Config
+SEMANTIC_MODEL_PATH = "CORTEX_ANALYST.CORTEX_AI.CORTEX_ANALYST_STAGE/nlp.yaml"
+CHAT_PROCEDURE = "CORTEX_ANALYST.CORTEX_AI.CORTEX_ANALYST_CHAT_PROCEDURE"
+DREMIO_PROCEDURE = "SALESFORCE_DREMIO.SALESFORCE_SCHEMA_DREMIO.DREMIO_DATA_PROCEDURE"
 
-# --- Constants ---
-METABASE_PUBLIC_URL = "https://swift-barb.metabaseapp.com/public/dashboard/3684da17-150a-4b59-a8b8-da220729c0fc"
-WEBHOOK_URL = "https://manually-cunning-bluejay.ngrok-free.app/webhook-test/2b3514c4-bf88-4f79-83a8-c0d19381cab0"
+def initialize_session():
+    if "messages" not in st.session_state:
+        st.session_state.messages = []
+    if "display_messages" not in st.session_state:
+        st.session_state.display_messages = []
+    if "processing" not in st.session_state:
+        st.session_state.processing = False
 
-# --- Page Setup ---
-st.set_page_config(page_title="ERP Dashboard", layout="wide")
-st.title("📊 Unified ERP Dashboard")
+def call_cortex_analyst_procedure(messages):
+    try:
+        messages_json = json.dumps(messages)
+        # session = get_active_session()
+        result = session.call(CHAT_PROCEDURE, messages_json, SEMANTIC_MODEL_PATH)
 
-# --- Refresh Dashboard ---
-if "reload_ts" not in st.session_state:
-    st.session_state.reload_ts = int(time.time())
+        if not result:
+            return None, "No response from procedure"
 
-if st.button("🔄 Refresh Dashboard"):
-    st.session_state.reload_ts = int(time.time())
+        procedure_response = json.loads(result)
+        if procedure_response.get("success", False):
+            return procedure_response.get("content", {}), None
+        else:
+            return None, procedure_response.get("error_message", "Unknown procedure error")
 
-iframe_url = f"{METABASE_PUBLIC_URL}?reload={st.session_state.reload_ts}"
-st.markdown(f"""
-    <iframe src="{iframe_url}"
-            frameborder="0"
-            width="100%"
-            height="600"
-            allowtransparency="true">
-    </iframe>
-""", unsafe_allow_html=True)
+    except SnowparkSQLException as e:
+        return None, f"Database Error: {str(e)}"
+    except json.JSONDecodeError as e:
+        return None, f"Invalid JSON response: {str(e)}"
+    except Exception as e:
+        return None, f"Unexpected error: {str(e)}"
 
-# --- Session State Defaults ---
-if "chat_open" not in st.session_state:
-    st.session_state.chat_open = False
-if "chat_history" not in st.session_state:
-    st.session_state.chat_history = [
-        ("Bot", 'Click on the "Refresh Dashboard" button to update and view the latest data in your dashboard.')
-    ]
+def call_dremio_data_procedure(sql_statement):
+    try:
+        # session = get_active_session()
+        df_result = session.call(DREMIO_PROCEDURE, sql_statement)
+        if hasattr(df_result, "to_pandas"):
+            return df_result.to_pandas(), None
+        return None, "Unexpected result format from Dremio procedure"
+    except SnowparkSQLException as e:
+        return None, f"Dremio SQL Error: {str(e)}"
+    except Exception as e:
+        return None, f"Dremio Error: {str(e)}"
 
-# --- Chat Icon ---
-with st.sidebar:
-    if st.button("💬 Open/Close Chat"):
-        st.session_state.chat_open = not st.session_state.chat_open
+def display_chat_message(role, content):
+    with st.chat_message(role):
+        if isinstance(content, str):
+            st.markdown(content)
+        elif isinstance(content, dict):
+            if "message" in content:
+                st.markdown(content["message"])
+            if "query" in content:
+                st.code(content["query"], language="sql")
 
-# --- Chat Window ---
-if st.session_state.chat_open:
-    with st.container():
-        st.markdown("""
-            <div style="position: fixed; bottom: 20px; right: 20px; width: 350px;
-                        max-height: 450px; background-color: white; border: 1px solid #ccc;
-                        border-radius: 10px; padding: 15px; overflow-y: auto; z-index: 9999;
-                        box-shadow: 0 4px 12px rgba(0,0,0,0.15);">
-        """, unsafe_allow_html=True)
+def process_user_question(question):
+    try:
+        st.session_state.processing = True
 
-        # Display chat history
-        for sender, msg in st.session_state.chat_history:
-            label = "🧑 You" if sender == "User" else "🤖 Bot"
-            st.markdown(f"**{label}:** {msg}")
+        # Add user message to conversation history
+        user_msg = {
+            "role": "user",
+            "content": [{"type": "text", "text": question}]
+        }
+        st.session_state.messages.append(user_msg)
+        
+        # Add to display messages for UI
+        st.session_state.display_messages.append({
+            "role": "user",
+            "content": question
+        })
+        
+        display_chat_message("user", question)
 
-        # Input form
-        with st.form("chat_form", clear_on_submit=True):
-            user_input = st.text_input("Type your message...", key="chat_input")
-            submitted = st.form_submit_button("Send")
-            if submitted and user_input.strip():
-                st.session_state.chat_history.append(("User", user_input))
-                try:
-                    res = requests.post(WEBHOOK_URL, json={"prompt": user_input}, timeout=10)
-                    bot_msg = "✅ Message successfully sent to backend." if res.ok else "⚠️ Backend error."
-                except Exception as e:
-                    bot_msg = f"❌ Failed: {str(e)}"
-                st.session_state.chat_history.append(("Bot", bot_msg))
+        with st.spinner("Analyzing your question..."):
+            # Send the full conversation history including both user and analyst messages
+            response, error = call_cortex_analyst_procedure(st.session_state.messages)
 
-        st.markdown("</div>", unsafe_allow_html=True)
+            if error:
+                raise Exception(error)
+
+            # Extract the analyst response
+            analyst_response = response.get("message", {})
+            content_block = analyst_response.get("content", [])
+            
+            if not isinstance(content_block, list):
+                raise Exception("Invalid response structure from Cortex Analyst")
+
+            sql_statement = None
+            explanation = ""
+            for block in content_block:
+                if block.get("type") == "text":
+                    explanation = block.get("text", "")
+                elif block.get("type") == "sql" and "statement" in block:
+                    sql_statement = block["statement"]
+
+            if not sql_statement:
+                raise Exception("No SQL found in response.")
+
+            # Call Dremio
+            dremio_result, dremio_error = call_dremio_data_procedure(sql_statement)
+            if dremio_error:
+                raise Exception(dremio_error)
+
+            # Show response
+            display_chat_message("assistant", explanation)
+            display_chat_message("assistant", {"message": "Generated SQL:", "query": sql_statement})
+
+            if dremio_result is not None and not dremio_result.empty:
+                with st.chat_message("assistant"):
+                    st.success("✅ Dremio executed successfully")
+                    st.dataframe(dremio_result, use_container_width=True)
+                    st.caption(f"{len(dremio_result)} rows × {len(dremio_result.columns)} columns")
+            else:
+                display_chat_message("assistant", "⚠️ No data returned from Dremio.")
+
+            # CRITICAL: Add the analyst response to conversation history
+            # This is required for multi-turn conversations
+            analyst_msg = {
+                "role": "analyst",
+                "content": content_block  # Use the original content blocks from the API response
+            }
+            st.session_state.messages.append(analyst_msg)
+
+            # Save assistant response for display
+            assistant_display = f"{explanation}\n\n**Generated SQL:**\n```sql\n{sql_statement}\n```\n\n✅ Executed in Dremio."
+            st.session_state.display_messages.append({
+                "role": "assistant",
+                "content": assistant_display
+            })
+
+    except Exception as e:
+        error_msg = f"❌ Error: {str(e)}"
+        st.error(error_msg)
+        # Add error to display messages
+        st.session_state.display_messages.append({
+            "role": "assistant",
+            "content": error_msg
+        })
+    finally:
+        st.session_state.processing = False
+
+def render_chat_interface():
+    st.title("🧠 Cortex Analyst")
+    st.caption("Ask natural questions. Get SQL + results.")
+
+    # Display messages from display_messages (for UI)
+    for msg in st.session_state.display_messages:
+        display_chat_message(msg["role"], msg["content"])
+
+    if prompt := st.chat_input("Ask something...", disabled=st.session_state.processing):
+        process_user_question(prompt)
+
+def render_sidebar():
+    pass  # Sidebar removed
+
+def main():
+    st.set_page_config(page_title="Cortex Analyst", page_icon="🧠", layout="wide")
+    initialize_session()
+    render_chat_interface()
+
+if __name__ == "__main__":
+    main()
