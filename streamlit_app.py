@@ -3,6 +3,7 @@ import streamlit as st
 from typing import Union
 import pandas as pd
 import altair as alt
+import uuid
 
 # Ensure page config and session initialization happens before anything else
 st.set_page_config(page_title="Cortex Analyst", page_icon="🧠", layout="wide")
@@ -52,34 +53,42 @@ def call_dremio_data_procedure(sql_statement):
 
 def display_chat_message(role, content):
     with st.chat_message(role):
-        if isinstance(content, str):
-            st.markdown(content)
-        elif isinstance(content, dict):
-            if content.get("type") == "text":
-                st.markdown(content.get("value"))
-            elif content.get("type") == "sql":
-                st.code(content.get("value"), language="sql")
-            elif content.get("type") == "result":
-                df = pd.DataFrame(content.get("data"))
-                sql = content.get("sql")
-                st.markdown("**Generated SQL:**")
-                st.code(sql, language="sql")
-                if not df.empty:
-                    st.success("✅ Dremio executed successfully")
-                    tab1, tab2 = st.tabs(["Data 📄", "Chart 📉"])
-                    with tab1:
-                        st.dataframe(df, use_container_width=True)
-                    with tab2:
-                        display_charts_tab(df, len(st.session_state.dataframes))
-                else:
-                    st.warning("⚠️ No data returned from Dremio.")
+        if isinstance(content, dict) and content.get("type") == "result":
+            df = pd.DataFrame(content.get("data"))
+            sql = content.get("sql")
+            st.markdown("**Generated SQL:**")
+            st.code(sql, language="sql")
+            if not df.empty:
+                st.success("✅ Dremio executed successfully")
+                tab1, tab2 = st.tabs(["Data 📄", "Chart 📉"])
+                with tab1:
+                    st.dataframe(df, use_container_width=True)
+                with tab2:
+                    unique_key = str(uuid.uuid4())[:8]  # generates unique 8-char key
+                    display_charts_tab(df, unique_key)
+            else:
+                st.warning("⚠️ No data returned from Dremio.")
 
-def display_charts_tab(df: pd.DataFrame, message_index: int) -> None:
+import altair as alt
+import pandas as pd
+import streamlit as st
+
+def display_charts_tab(df: pd.DataFrame, key_suffix: str) -> None:
+    """
+    Display various charts based on the DataFrame using unique keys.
+
+    Args:
+        df (pd.DataFrame): The query results from Dremio.
+        key_suffix (str): A unique identifier (e.g., UUID or hash) to prevent widget key collisions.
+    """
     if len(df.columns) >= 2:
         all_cols = list(df.columns)
+
         col1, col2 = st.columns(2)
-        x_col = col1.selectbox("X axis", all_cols, key=f"x_col_{message_index}")
-        y_col = col2.selectbox("Y axis", [col for col in all_cols if col != x_col], key=f"y_col_{message_index}")
+        x_col = col1.selectbox("X axis", all_cols, key=f"x_col_{key_suffix}")
+        y_col = col2.selectbox(
+            "Y axis", [col for col in all_cols if col != x_col], key=f"y_col_{key_suffix}"
+        )
 
         chart_type = st.selectbox(
             "Select chart type",
@@ -87,7 +96,7 @@ def display_charts_tab(df: pd.DataFrame, message_index: int) -> None:
                 "Line Chart 📈", "Bar Chart 📊", "Pie Chart 🥧", "Scatter Plot 🔵",
                 "Histogram 📊", "Box Plot 📦", "Combo Chart 🔀", "Number Chart 🔢"
             ],
-            key=f"chart_type_{message_index}"
+            key=f"chart_type_{key_suffix}"
         )
 
         chart_data = df[[x_col, y_col]].dropna()
@@ -137,7 +146,7 @@ def display_charts_tab(df: pd.DataFrame, message_index: int) -> None:
             st.metric(label=f"{y_col} Total", value=round(chart_data[y_col].sum(), 2))
 
     else:
-        st.write("⚠️ At least 2 columns required to display chart")
+        st.warning("⚠️ At least 2 columns are required to render a chart.")
 
 def process_user_question(question):
     try:
