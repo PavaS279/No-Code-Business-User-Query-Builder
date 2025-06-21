@@ -18,19 +18,15 @@ DREMIO_PROCEDURE = "SALESFORCE_DREMIO.SALESFORCE_SCHEMA_DREMIO.DREMIO_DATA_PROCE
 def initialize_session():
     if "messages" not in st.session_state:
         st.session_state.messages = []
-        st.session_state.active_suggestion = None
-        st.session_state.warnings = []
-        st.session_state.form_submitted = {}
-        st.session_state.pending_clarification = None
     if "display_messages" not in st.session_state:
         st.session_state.display_messages = []
     if "processing" not in st.session_state:
         st.session_state.processing = False
     if "dataframes" not in st.session_state:
         st.session_state.dataframes = []
-    if "initialized" not in st.session_state:
-        st.session_state.initialized = True
-        st.rerun()
+    if "pending_question" not in st.session_state:
+        st.session_state.pending_question = None
+
 # yy
 def call_cortex_analyst_procedure(messages):
     try:
@@ -220,8 +216,16 @@ def render_chat_interface():
     for msg in st.session_state.display_messages:
         display_chat_message(msg["role"], msg["content"])
 
-    if prompt := st.chat_input("Ask something...", disabled=st.session_state.processing):
-        process_user_question(prompt)
+    # Handle submission first
+    if st.session_state.pending_question:
+        process_user_question(st.session_state.pending_question)
+        st.session_state.pending_question = None  # Reset
+
+    # Collect input without triggering a direct callback
+    question = st.chat_input("Ask something...", disabled=st.session_state.processing)
+    if question:
+        st.session_state.pending_question = question
+        st.experimental_rerun()
 
 # Entry point
 initialize_session()
