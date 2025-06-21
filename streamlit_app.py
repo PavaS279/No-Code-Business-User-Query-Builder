@@ -2,9 +2,7 @@ import json
 import streamlit as st
 from typing import Union
 import pandas as pd
-
-# from snowflake.snowpark.context import get_active_session
-# from snowflake.snowpark.exceptions import SnowparkSQLException
+import altair as alt
 
 cnx = st.connection("snowflake")
 session = cnx.session()
@@ -27,6 +25,8 @@ def initialize_session():
         st.session_state.processing = False
     if "dataframes" not in st.session_state:
         st.session_state.dataframes = []
+    if "display_charts" not in st.session_state:
+        st.session_state.display_charts = []
 
 def call_cortex_analyst_procedure(messages):
     try:
@@ -67,15 +67,62 @@ def display_charts_tab(df: pd.DataFrame, message_index: int) -> None:
         col1, col2 = st.columns(2)
         x_col = col1.selectbox("X axis", all_cols, key=f"x_col_{message_index}")
         y_col = col2.selectbox("Y axis", [col for col in all_cols if col != x_col], key=f"y_col_{message_index}")
-        chart_type = st.selectbox("Select chart type", ["Line Chart 📈", "Bar Chart 📊"], key=f"chart_type_{message_index}")
+
+        chart_type = st.selectbox(
+            "Select chart type",
+            [
+                "Line Chart 📈", "Bar Chart 📊", "Pie Chart 🥧", "Scatter Plot 🔵",
+                "Histogram 📊", "Box Plot 📦", "Combo Chart 🔀", "Number Chart 🔢"
+            ],
+            key=f"chart_type_{message_index}"
+        )
 
         chart_data = df[[x_col, y_col]].dropna()
-        chart_data.set_index(x_col, inplace=True)
 
         if chart_type == "Line Chart 📈":
-            st.line_chart(chart_data)
+            st.line_chart(chart_data.set_index(x_col))
+
         elif chart_type == "Bar Chart 📊":
-            st.bar_chart(chart_data)
+            st.bar_chart(chart_data.set_index(x_col))
+
+        elif chart_type == "Pie Chart 🥧":
+            pie = alt.Chart(chart_data).mark_arc().encode(
+                theta=alt.Theta(field=y_col, type="quantitative"),
+                color=alt.Color(field=x_col, type="nominal")
+            )
+            st.altair_chart(pie, use_container_width=True)
+
+        elif chart_type == "Scatter Plot 🔵":
+            scatter = alt.Chart(chart_data).mark_circle(size=60).encode(
+                x=x_col,
+                y=y_col,
+                tooltip=[x_col, y_col]
+            ).interactive()
+            st.altair_chart(scatter, use_container_width=True)
+
+        elif chart_type == "Histogram 📊":
+            hist = alt.Chart(chart_data).mark_bar().encode(
+                alt.X(y_col, bin=True),
+                y='count()'
+            )
+            st.altair_chart(hist, use_container_width=True)
+
+        elif chart_type == "Box Plot 📦":
+            box = alt.Chart(chart_data).mark_boxplot().encode(
+                x=x_col,
+                y=y_col
+            )
+            st.altair_chart(box, use_container_width=True)
+
+        elif chart_type == "Combo Chart 🔀":
+            line = alt.Chart(chart_data).mark_line(color='blue').encode(x=x_col, y=y_col)
+            bar = alt.Chart(chart_data).mark_bar(opacity=0.3).encode(x=x_col, y=y_col)
+            combo = bar + line
+            st.altair_chart(combo, use_container_width=True)
+
+        elif chart_type == "Number Chart 🔢":
+            st.metric(label=f"{y_col} Total", value=round(chart_data[y_col].sum(), 2))
+
     else:
         st.write("⚠️ At least 2 columns required to display chart")
 
@@ -111,11 +158,16 @@ def process_user_question(question):
             if dremio_error:
                 raise Exception(dremio_error)
 
-            display_chat_message("assistant", explanation)
-            display_chat_message("assistant", {"message": "Generated SQL:", "query": sql_statement})
+            analyst_msg = {"role": "analyst", "content": content_block}
+            st.session_state.messages.append(analyst_msg)
 
-            if dremio_result is not None and not dremio_result.empty:
-                with st.chat_message("assistant"):
+            assistant_display = f"{explanation}\n\n**Generated SQL:**\n```sql\n{sql_statement}\n```\n\n✅ Executed in Dremio."
+            st.session_state.display_messages.append({"role": "assistant", "content": assistant_display})
+
+            with st.chat_message("assistant"):
+                st.markdown(explanation)
+                st.code(sql_statement, language="sql")
+                if dremio_result is not None and not dremio_result.empty:
                     st.success("✅ Dremio executed successfully")
                     tab1, tab2 = st.tabs(["Data 📄", "Chart 📉"])
                     with tab1:
@@ -123,14 +175,8 @@ def process_user_question(question):
                     with tab2:
                         display_charts_tab(dremio_result, len(st.session_state.dataframes))
                     st.session_state.dataframes.append(dremio_result)
-            else:
-                display_chat_message("assistant", "⚠️ No data returned from Dremio.")
-
-            analyst_msg = {"role": "analyst", "content": content_block}
-            st.session_state.messages.append(analyst_msg)
-
-            assistant_display = f"{explanation}\n\n**Generated SQL:**\n```sql\n{sql_statement}\n```\n\n✅ Executed in Dremio."
-            st.session_state.display_messages.append({"role": "assistant", "content": assistant_display})
+                else:
+                    st.warning("⚠️ No data returned from Dremio.")
 
     except Exception as e:
         error_msg = f"❌ Error: {str(e)}"
@@ -148,7 +194,7 @@ def render_chat_interface():
         process_user_question(prompt)
 
 def main():
-    st.set_page_config(page_title="NLP-Bashboards with Unified ERP Data", page_icon="🧠", layout="wide")
+    st.set_page_config(page_title="Cortex Analyst", page_icon="🧠", layout="wide")
     initialize_session()
     render_chat_interface()
 
