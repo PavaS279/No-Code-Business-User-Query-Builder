@@ -26,7 +26,6 @@ def initialize_session():
         st.session_state.dataframes = []
     if "pending_question" not in st.session_state:
         st.session_state.pending_question = None
-
 # yy
 def call_cortex_analyst_procedure(messages):
     try:
@@ -210,22 +209,24 @@ def process_user_question(question):
         st.session_state.processing = False
 
 def render_chat_interface():
+    # Handle input first and rerun immediately
+    if st.session_state.get("pending_question"):
+        question = st.session_state.pending_question
+        st.session_state.pending_question = None
+        process_user_question(question)
+        st.experimental_rerun()  # Safe: rerun before rendering
+
+    # UI Rendering starts
     st.title("🧠 NLP-Bashboards with Unified ERP Data")
     st.caption("Ask natural questions. Get Bashboards + Unified ERP Data results.")
 
     for msg in st.session_state.display_messages:
         display_chat_message(msg["role"], msg["content"])
 
-    # Handle submission first
-    if st.session_state.pending_question:
-        process_user_question(st.session_state.pending_question)
-        st.session_state.pending_question = None  # Reset
-
-    # Collect input without triggering a direct callback
     question = st.chat_input("Ask something...", disabled=st.session_state.processing)
     if question:
         st.session_state.pending_question = question
-        st.experimental_rerun()
+        st.experimental_rerun()  # Trigger rerun safely before display
 
 # Entry point
 initialize_session()
