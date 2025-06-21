@@ -213,14 +213,23 @@ def process_user_question(question):
 def render_chat_interface():
     st.title("🧠 NLP-Bashboards with Unified ERP Data")
     st.caption("Ask natural questions. Get Bashboards + Unified ERP Data results.")
+
+    # ✅ Ensure session state exists before using it
+    if "display_messages" not in st.session_state:
+        st.session_state.display_messages = []
+
     for msg in st.session_state.display_messages:
         display_chat_message(msg["role"], msg["content"])
+
     if prompt := st.chat_input("Ask something...", disabled=st.session_state.processing):
         process_user_question(prompt)
 
+
 def main():
     st.set_page_config(page_title="Cortex Analyst", page_icon="🧠", layout="wide")
+    
     initialize_session()
+    
     render_chat_interface()
 
 if __name__ == "__main__":
