@@ -235,7 +235,7 @@ def render_chat_interface():
         st.rerun()  # Safe: rerun before rendering
 
     # UI Rendering starts
-    st.title("🧠 NLP-Bashboards with Unified ERP Data")
+    st.title("🧠 NLP-Based Bashboards with Unified ERP Data")
     st.caption("Ask natural questions. Get Bashboards + Unified ERP Data results.")
 
     for msg in st.session_state.display_messages:
