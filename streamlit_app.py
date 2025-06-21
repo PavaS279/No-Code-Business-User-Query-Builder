@@ -226,7 +226,7 @@ def render_chat_interface():
     question = st.chat_input("Ask something...", disabled=st.session_state.processing)
     if question:
         st.session_state.pending_question = question
-        st.experimental_rerun()  # Trigger rerun safely before display
+        st.rerun()  # Trigger rerun safely before display
 
 # Entry point
 initialize_session()
