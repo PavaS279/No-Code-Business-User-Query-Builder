@@ -214,7 +214,7 @@ def render_chat_interface():
         question = st.session_state.pending_question
         st.session_state.pending_question = None
         process_user_question(question)
-        st.experimental_rerun()  # Safe: rerun before rendering
+        st.rerun()  # Safe: rerun before rendering
 
     # UI Rendering starts
     st.title("🧠 NLP-Bashboards with Unified ERP Data")
