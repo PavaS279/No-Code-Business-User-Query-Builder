@@ -148,7 +148,7 @@ def render_chat_interface():
         process_user_question(prompt)
 
 def main():
-    st.set_page_config(page_title="Cortex Analyst", page_icon="🧠", layout="wide")
+    st.set_page_config(page_title="NLP-Bashboards with Unified ERP Data", page_icon="🧠", layout="wide")
     initialize_session()
     render_chat_interface()
 
