@@ -30,7 +30,7 @@ def call_cortex_analyst_procedure(messages):
     try:
         messages_json = json.dumps(messages)
         result = session.call(CHAT_PROCEDURE, messages_json, SEMANTIC_MODEL_PATH)
-        st.write("📩 Raw response from Cortex:", result)
+        # st.write("📩 Raw response from Cortex:", result)
         if not result:
             return None, "No response from procedure"
         procedure_response = json.loads(result)
