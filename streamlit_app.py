@@ -1,94 +1,126 @@
 import json
 import streamlit as st
-from typing import Union
 import pandas as pd
+from snowflake.snowpark.exceptions import SnowparkSQLException
+from datetime import datetime
+from typing import Dict, List, Optional, Tuple, Union
 import altair as alt
-import uuid
+import numpy as np
+import re
 import hashlib
-
-# Ensure page config and session initialization happens before anything else
-st.set_page_config(page_title="Cortex Analyst", page_icon="🧠", layout="wide")
 
 cnx = st.connection("snowflake")
 session = cnx.session()
 
-# Config
+# Configuration
 SEMANTIC_MODEL_PATH = "CORTEX_ANALYST.CORTEX_AI.CORTEX_ANALYST_STAGE/nlp.yaml"
 CHAT_PROCEDURE = "CORTEX_ANALYST.CORTEX_AI.CORTEX_ANALYST_CHAT_PROCEDURE1"
 DREMIO_PROCEDURE = "SALESFORCE_DREMIO.SALESFORCE_SCHEMA_DREMIO.DREMIO_DATA_PROCEDURE"
 
-def initialize_session():
+# Page configuration
+st.set_page_config(
+    page_title="Cortex Analyst Chat",
+    page_icon="🤖",
+    layout="wide",
+    initial_sidebar_state="collapsed"
+)
+
+def initialize_session_state():
+    """Initialize session state variables for chat functionality."""
     if "messages" not in st.session_state:
         st.session_state.messages = []
-    if "display_messages" not in st.session_state:
-        st.session_state.display_messages = []
+    if "user_messages" not in st.session_state:
+        st.session_state.user_messages = []
+    if "active_suggestion" not in st.session_state:
+        st.session_state.active_suggestion = None
+    if "message_counter" not in st.session_state:
+        st.session_state.message_counter = 0
+    if "data_sources_info" not in st.session_state:
+        st.session_state.data_sources_info = {}
+    if "chat_initialized" not in st.session_state:
+        st.session_state.chat_initialized = False
     if "processing" not in st.session_state:
         st.session_state.processing = False
-    if "dataframes" not in st.session_state:
-        st.session_state.dataframes = []
     if "pending_question" not in st.session_state:
         st.session_state.pending_question = None
-# yy
-def call_cortex_analyst_procedure(messages):
+
+def call_cortex_analyst_procedure(user_message: str) -> Tuple[Optional[Dict], Optional[str]]:
+    """Call the Cortex Analyst procedure with user message."""
     try:
-        messages_json = json.dumps(messages)
+        messages_list = [{
+            "role": "user",
+            "content": [{"type": "text", "text": user_message}]
+        }]
+        
+        messages_json = json.dumps(messages_list)
         result = session.call(CHAT_PROCEDURE, messages_json, SEMANTIC_MODEL_PATH)
+        
         if not result:
             return None, "No response from procedure"
+        
         procedure_response = json.loads(result)
+        
         if procedure_response.get("success", False):
             return procedure_response.get("content", {}), None
         else:
             return None, procedure_response.get("error_message", "Unknown procedure error")
+            
+    except SnowparkSQLException as e:
+        return None, f"Database Error: {str(e)}"
+    except json.JSONDecodeError as e:
+        return None, f"Invalid JSON response: {str(e)}"
     except Exception as e:
-        return None, f"Error: {str(e)}"
+        return None, f"Unexpected error: {str(e)}"
 
-def call_dremio_data_procedure(sql_statement):
+def call_dremio_data_procedure(sql_statement: str) -> Tuple[Optional[pd.DataFrame], Optional[str]]:
+    """Execute SQL via Dremio procedure."""
     try:
         df_result = session.call(DREMIO_PROCEDURE, sql_statement)
+        
         if hasattr(df_result, "to_pandas"):
             return df_result.to_pandas(), None
-        return None, "Unexpected result format from Dremio procedure"
+        elif isinstance(df_result, pd.DataFrame):
+            return df_result, None
+        else:
+            return None, "Unexpected result format from Dremio procedure"
+            
+    except SnowparkSQLException as e:
+        return None, f"Dremio SQL Error: {str(e)}"
     except Exception as e:
         return None, f"Dremio Error: {str(e)}"
 
-def display_chat_message(role, content, message_index=None):
-    with st.chat_message(role):
-        if isinstance(content, str):
-            st.markdown(content)
-        elif isinstance(content, dict):
-            if content.get("type") == "text":
-                st.markdown(content.get("value"))
-
-            elif content.get("type") == "sql":
-                st.code(content.get("value"), language="sql")
-
-            elif content.get("type") == "result":
-                df = pd.DataFrame(content.get("data"))
-                sql = content.get("sql")
-
-                st.markdown("**Generated SQL:**")
-                st.code(sql, language="sql")
-
-                if not df.empty:
-                    st.success("✅ Dremio executed successfully")
-                    tab1, tab2 = st.tabs(["Data 📄", "Chart 📉"])
-                    with tab1:
-                        st.dataframe(df, use_container_width=True)
-                    with tab2:
-                        # Use a stable hash from SQL statement as key
-                        sql_hash = hashlib.md5(sql.encode()).hexdigest()[:8]
-                        display_charts_tab(df, sql_hash)
-                else:
-                    st.warning("⚠️ No data returned from Dremio.")
+def identify_data_sources_from_sql(sql_statement: str) -> List[str]:
+    """Identify data sources from SQL statement."""
+    sources = []
+    sql_lower = sql_statement.lower()
+    
+    source_mapping = {
+        'salesforce': '🔹 Salesforce',
+        'odoo': '🟦 Odoo', 
+        'sap': '🟨 SAP',
+        'dremio': '🔷 Dremio',
+        'warehouse': '🏢 Data Warehouse'
+    }
+    
+    for keyword, display_name in source_mapping.items():
+        if keyword in sql_lower:
+            sources.append(display_name)
+    
+    # If no specific source found, try to infer from schema/table names
+    if not sources:
+        if any(term in sql_lower for term in ['account', 'opportunity', 'lead', 'contact']):
+            sources.append('🔹 Salesforce')
+        elif any(term in sql_lower for term in ['partner', 'product', 'stock']):
+            sources.append('🟦 Odoo')
+        else:
+            sources.append('🏢 Data Warehouse')
+    
+    return sources
 
 def display_charts_tab(df: pd.DataFrame, key_suffix: str) -> None:
     """
     Display various charts based on the DataFrame using unique keys.
-
-    Args:
-        df (pd.DataFrame): The query results from Dremio.
-        key_suffix (str): A unique identifier (e.g., UUID or hash) to prevent widget key collisions.
+    This logic is taken from the second code.
     """
     if len(df.columns) >= 2:
         all_cols = list(df.columns)
@@ -157,95 +189,292 @@ def display_charts_tab(df: pd.DataFrame, key_suffix: str) -> None:
     else:
         st.warning("⚠️ At least 2 columns are required to render a chart.")
 
-def process_user_question(question):
+def create_visualization_with_tabs(df: pd.DataFrame, sql_statement: str, data_sources: List[str] = None) -> None:
+    """Create visualization with data and chart tabs using logic from second code."""
+    if df.empty:
+        st.info("📊 No data to visualize.")
+        return
+    
+    try:
+        # Display data source information
+        if data_sources:
+            source_text = " • ".join(data_sources)
+            st.info(f"📊 **Data Sources:** {source_text}")
+        
+        # Display SQL query
+        # st.markdown("**Generated SQL:**")
+        # st.code(sql_statement, language="sql")
+        
+        if not df.empty:
+            # st.success("✅ Dremio executed successfully")
+            tab1, tab2 = st.tabs(["Data 📄", "Chart 📉"])
+            
+            with tab1:
+                st.dataframe(df, use_container_width=True)
+                st.caption(f"📊 Showing {len(df)} rows × {len(df.columns)} columns")
+            
+            with tab2:
+                # Use a stable hash from SQL statement as key
+                sql_hash = hashlib.md5(sql_statement.encode()).hexdigest()[:8]
+                display_charts_tab(df, sql_hash)
+        else:
+            st.warning("⚠️ No data returned from Dremio.")
+            
+    except Exception as e:
+        st.error(f"Error creating visualization: {str(e)}")
+        st.dataframe(df, use_container_width=True)
+
+def extract_sql_from_response(response_content: Dict) -> Optional[str]:
+    """Extract SQL statement from Cortex Analyst response."""
+    try:
+        message_content = response_content.get("message", {}).get("content", [])
+        for block in message_content:
+            if block.get("type") == "sql":
+                return block.get("statement", "")
+        return None
+    except Exception:
+        return None
+
+def extract_suggestions_from_response(response_content: Dict) -> List[str]:
+    """Extract suggestions from Cortex Analyst response."""
+    try:
+        message_content = response_content.get("message", {}).get("content", [])
+        for block in message_content:
+            if block.get("type") == "suggestions":
+                return block.get("suggestions", [])
+        return []
+    except Exception:
+        return []
+
+def extract_text_from_response(response_content: Dict) -> str:
+    """Extract text content from Cortex Analyst response."""
+    try:
+        message_content = response_content.get("message", {}).get("content", [])
+        text_parts = []
+        for block in message_content:
+            if block.get("type") == "text":
+                text_parts.append(block.get("text", ""))
+        return "\n".join(text_parts)
+    except Exception:
+        return "Unable to extract response text."
+
+def display_suggestions(suggestions: List[str], key_prefix: str = ""):
+    """Display clickable suggestion buttons."""
+    if not suggestions:
+        return
+    
+    st.markdown("💡 **Suggested follow-up questions:**")
+    
+    # Create columns for suggestions (2 per row)
+    cols = st.columns(2)
+    for i, suggestion in enumerate(suggestions[:6]):  # Limit to 6 suggestions
+        col_idx = i % 2
+        with cols[col_idx]:
+            if st.button(
+                suggestion,
+                key=f"{key_prefix}_suggestion_{i}",
+                help="Click to ask this question",
+                use_container_width=True
+            ):
+                st.session_state.active_suggestion = suggestion
+                st.rerun()
+
+def process_user_question(question: str):
+    """Process user question and generate response."""
     try:
         st.session_state.processing = True
-
-        user_msg = {
+        
+        # Add user message to chat
+        st.session_state.messages.append({
             "role": "user",
-            "content": [{"type": "text", "text": question}]
-        }
-        st.session_state.messages.append(user_msg)
-        st.session_state.display_messages.append({
-            "role": "user",
-            "content": {"type": "text", "value": question}
+            "content": question,
+            "timestamp": datetime.now()
         })
-
+        
+        # Display user message
         with st.chat_message("user"):
             st.markdown(question)
-
-        with st.spinner("Analyzing your question..."):
-            response, error = call_cortex_analyst_procedure(st.session_state.messages)
-
+        
+        # Get AI response
+        with st.spinner("🤔 Analyzing your question..."):
+            response_content, error = call_cortex_analyst_procedure(question)
+            
             if error:
                 raise Exception(f"Cortex Analyst Error: {error}")
-            if not response or not isinstance(response, dict):
+            
+            if not response_content or not isinstance(response_content, dict):
                 raise Exception("❌ Invalid or empty response from Cortex Analyst")
-
-            analyst_response = response.get("message", {})
-            content_block = analyst_response.get("content", [])
-            if not isinstance(content_block, list):
-                raise Exception("❌ Unexpected format in 'content_block'")
-
-            sql_statement = ""
-            explanation = ""
-            for block in content_block:
-                if block.get("type") == "text":
-                    explanation = block.get("text", "")
-                elif block.get("type") == "sql" and "statement" in block:
-                    sql_statement = block["statement"]
-
-            if not sql_statement:
-                raise Exception("❌ SQL statement not generated by analyst")
-
-            dremio_result, dremio_error = call_dremio_data_procedure(sql_statement)
-            if dremio_error:
-                raise Exception(f"❌ Dremio execution failed: {dremio_error}")
-
+            
+            # Display assistant response
+            with st.chat_message("assistant"):
+                # Display text response
+                text_content = extract_text_from_response(response_content)
+                if text_content:
+                    st.markdown(text_content)
+                
+                # Extract and execute SQL if present
+                sql_statement = extract_sql_from_response(response_content)
+                if sql_statement:
+                    # Execute SQL and create visualization
+                    with st.spinner("🔄 Executing query and creating visualization..."):
+                        df, sql_error = call_dremio_data_procedure(sql_statement)
+                        
+                        if df is not None:
+                            # Identify data sources
+                            data_sources = identify_data_sources_from_sql(sql_statement)
+                            
+                            # Create visualization with tabs
+                            create_visualization_with_tabs(df, sql_statement, data_sources)
+                            
+                        elif sql_error:
+                            st.error(f"❌ **SQL Execution Error:** {sql_error}")
+                        else:
+                            st.info("ℹ️ Query executed successfully but returned no data.")
+                
+                # Display suggestions
+                suggestions = extract_suggestions_from_response(response_content)
+                if suggestions:
+                    display_suggestions(suggestions, f"msg_{len(st.session_state.messages)}")
+            
+            # Add assistant message to chat history
             st.session_state.messages.append({
-                "role": "analyst",
-                "content": content_block
-            })
-
-            st.session_state.display_messages.append({
                 "role": "assistant",
-                "content": {
-                    "type": "result",
-                    "sql": sql_statement,
-                    "data": dremio_result.to_dict(orient="records")
-                }
+                "content": response_content,
+                "timestamp": datetime.now(),
+                "message_id": f"msg_{len(st.session_state.messages)}"
             })
-
+            
     except Exception as e:
-        error_msg = f"❌ Error: {str(e)}"
-        st.error(error_msg)
-        st.session_state.display_messages.append({
+        error_message = f"❌ Error: {str(e)}"
+        st.error(error_message)
+        
+        # Add error message to chat history
+        st.session_state.messages.append({
             "role": "assistant",
-            "content": {"type": "text", "value": error_msg}
+            "content": {"message": {"content": [{"type": "text", "text": error_message}]}},
+            "timestamp": datetime.now(),
+            "message_id": f"error_{len(st.session_state.messages)}"
         })
+        
     finally:
         st.session_state.processing = False
 
+def send_welcome_message():
+    """Send welcome message to get initial suggestions."""
+    if not st.session_state.chat_initialized:
+        welcome_query = "What questions can I ask? Help me get started."
+        response_content, error = call_cortex_analyst_procedure(welcome_query)
+        
+        if response_content and not error:
+            # Store welcome message
+            st.session_state.messages.append({
+                "role": "assistant",
+                "content": response_content,
+                "timestamp": datetime.now(),
+                "message_id": "welcome"
+            })
+        
+        st.session_state.chat_initialized = True
+
 def render_chat_interface():
-    # Handle input first and rerun immediately
+    """Render the main chat interface."""
+    # Handle pending question first
     if st.session_state.get("pending_question"):
         question = st.session_state.pending_question
         st.session_state.pending_question = None
         process_user_question(question)
-        st.rerun()  # Safe: rerun before rendering
-
-    # UI Rendering starts
-    st.title("🧠 NLP-Based Dashboards with Unified ERP Data")
-    st.caption("Let's get started, type help to \"How to start\". Ask natural questions. Get Dashboards + Unified ERP Data results.t")
-
-    for msg in st.session_state.display_messages:
-        display_chat_message(msg["role"], msg["content"])
-
-    question = st.chat_input("Ask something...", disabled=st.session_state.processing)
+        st.rerun()
+    
+    # Handle active suggestion
+    if st.session_state.active_suggestion:
+        question = st.session_state.active_suggestion
+        st.session_state.active_suggestion = None
+        st.session_state.pending_question = question
+        st.rerun()
+    
+    # App header
+    st.title("🤖 NLP-Based Dashboard's with Data")
+    st.markdown("Let's get started, Ask questions about your data in natural language!")
+    
+    # Display existing chat messages (except the current processing one)
+    for i, message in enumerate(st.session_state.messages):
+        message_id = message.get("message_id", f"msg_{i}")
+        
+        if message["role"] == "user":
+            with st.chat_message("user"):
+                st.markdown(message["content"])
+                
+        elif message["role"] == "assistant":
+            with st.chat_message("assistant"):
+                response_content = message["content"]
+                
+                # Display text response
+                text_content = extract_text_from_response(response_content)
+                if text_content:
+                    st.markdown(text_content)
+                
+                # Extract and show SQL + visualization if present
+                sql_statement = extract_sql_from_response(response_content)
+                if sql_statement:
+                    # Re-execute query for historical messages (cached in real implementation)
+                    df, sql_error = call_dremio_data_procedure(sql_statement)
+                    
+                    if df is not None and not df.empty:
+                        data_sources = identify_data_sources_from_sql(sql_statement)
+                        create_visualization_with_tabs(df, sql_statement, data_sources)
+                    elif sql_error:
+                        st.error(f"❌ **SQL Execution Error:** {sql_error}")
+                
+                # Display suggestions
+                suggestions = extract_suggestions_from_response(response_content)
+                if suggestions:
+                    display_suggestions(suggestions, f"msg_{i}")
+    
+    # Chat input
+    question = st.chat_input("Ask me anything about your data...", disabled=st.session_state.processing)
     if question:
         st.session_state.pending_question = question
-        st.rerun()  # Trigger rerun safely before display
+        st.rerun()
 
-# Entry point
-initialize_session()
-render_chat_interface()
+def main():
+    """Main Streamlit application."""
+    # Initialize session state
+    initialize_session_state()
+    
+    # Send welcome message on first load
+    send_welcome_message()
+    
+    # Render chat interface
+    render_chat_interface()
+    
+    # Sidebar with chat controls
+    # with st.sidebar:
+    #     st.header("🛠️ Chat Controls")
+        
+    #     if st.button("🗑️ Clear Chat History", use_container_width=True):
+    #         st.session_state.messages = []
+    #         st.session_state.chat_initialized = False
+    #         st.rerun()
+        
+    #     if st.button("🔄 Reset Welcome", use_container_width=True):
+    #         st.session_state.messages = []
+    #         st.session_state.chat_initialized = False
+    #         st.rerun()
+        
+    #     st.markdown("---")
+    #     st.markdown("### 📊 Features")
+    #     st.markdown("""
+    #     - 💬 Natural language queries
+    #     - 📈 Interactive chart dashboard  
+    #     - 🔍 SQL query inspection
+    #     - 💡 Smart follow-up suggestions
+    #     - 🎯 Multiple chart types with Altair
+    #     """)
+        
+    #     if st.session_state.messages:
+    #         st.markdown("---")
+    #         st.markdown(f"**Messages:** {len(st.session_state.messages)}")
+    #         st.markdown(f"**Last activity:** {datetime.now().strftime('%H:%M:%S')}")
+
+if __name__ == "__main__":
+    main()
