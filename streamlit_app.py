@@ -9,6 +9,7 @@ import numpy as np
 import re
 import hashlib
 
+# g
 cnx = st.connection("snowflake")
 session = cnx.session()
 
