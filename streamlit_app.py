@@ -236,7 +236,7 @@ def render_chat_interface():
 
     # UI Rendering starts
     st.title("🧠 NLP-Based Dashboards with Unified ERP Data")
-    st.caption("Ask natural questions. Get Dashboards + Unified ERP Data results.")
+    st.caption("Let's get started, type help to \"How to start\". Ask natural questions. Get Dashboards + Unified ERP Data results.t")
 
     for msg in st.session_state.display_messages:
         display_chat_message(msg["role"], msg["content"])
