@@ -25,7 +25,6 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="collapsed"
 )
-loger.info('app started')
 def initialize_session_state():
     """Initialize session state variables for chat functionality."""
     if "messages" not in st.session_state:
