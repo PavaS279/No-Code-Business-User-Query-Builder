@@ -8,8 +8,9 @@ import altair as alt
 import numpy as np
 import re
 import hashlib
+import time
 
-# g
+# Snowflake connection
 cnx = st.connection("snowflake")
 session = cnx.session()
 
@@ -25,6 +26,50 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="collapsed"
 )
+
+# Custom CSS for better UX
+st.markdown("""
+<style>
+    .stSpinner > div {
+        text-align: center;
+        color: #1f77b4;
+    }
+    
+    .loading-messages {
+        padding: 10px;
+        background-color: #f0f8ff;
+        border-radius: 10px;
+        margin: 10px 0;
+        text-align: center;
+        border-left: 4px solid #1f77b4;
+    }
+    
+    .scroll-to-bottom {
+        animation: slideIn 0.5s ease-in-out;
+    }
+    
+    @keyframes slideIn {
+        from {
+            opacity: 0;
+            transform: translateY(20px);
+        }
+        to {
+            opacity: 1;
+            transform: translateY(0);
+        }
+    }
+    
+    .stChatMessage {
+        animation: fadeIn 0.3s ease-in-out;
+    }
+    
+    @keyframes fadeIn {
+        from { opacity: 0; }
+        to { opacity: 1; }
+    }
+</style>
+""", unsafe_allow_html=True)
+
 def initialize_session_state():
     """Initialize session state variables for chat functionality."""
     if "messages" not in st.session_state:
@@ -43,6 +88,61 @@ def initialize_session_state():
         st.session_state.processing = False
     if "pending_question" not in st.session_state:
         st.session_state.pending_question = None
+    if "loading_start_time" not in st.session_state:
+        st.session_state.loading_start_time = None
+    if "current_loading_message" not in st.session_state:
+        st.session_state.current_loading_message = 0
+
+def get_loading_message(elapsed_time: float) -> str:
+    """Get dynamic loading message based on elapsed time."""
+    messages = [
+        "🤔 Analyzing your question...",
+        "🔍 Searching through your data...",
+        "⚡ Processing your request...",
+        "📊 Preparing your insights...",
+        "🚀 Almost there...",
+        "⏳ This is taking longer than expected...",
+        "🎯 Getting the best results for you...",
+        "💡 Analyzing complex patterns...",
+        "🔄 Still working on it...",
+        "⚡ Finalizing your results..."
+    ]
+    
+    if elapsed_time < 3:
+        return messages[0]
+    elif elapsed_time < 6:
+        return messages[1]
+    elif elapsed_time < 10:
+        return messages[2]
+    elif elapsed_time < 15:
+        return messages[5]  # "Taking longer than expected"
+    else:
+        # Cycle through remaining messages for very long waits
+        idx = int(elapsed_time / 3) % len(messages[6:])
+        return messages[6 + idx]
+
+def display_dynamic_spinner(placeholder):
+    """Display dynamic spinner with changing messages."""
+    start_time = time.time()
+    
+    while st.session_state.processing:
+        elapsed = time.time() - start_time
+        message = get_loading_message(elapsed)
+        
+        with placeholder:
+            st.markdown(f"""
+            <div class="loading-messages">
+                <h4>{message}</h4>
+                <p>Please hold on while we process your request...</p>
+            </div>
+            """, unsafe_allow_html=True)
+            
+            # Show spinner
+            with st.spinner(message):
+                time.sleep(1)  # Update every second
+        
+        if not st.session_state.processing:
+            break
 
 def call_cortex_analyst_procedure(user_message: str) -> Tuple[Optional[Dict], Optional[str]]:
     """Call the Cortex Analyst procedure with user message."""
@@ -118,10 +218,7 @@ def identify_data_sources_from_sql(sql_statement: str) -> List[str]:
     return sources
 
 def display_charts_tab(df: pd.DataFrame, key_suffix: str) -> None:
-    """
-    Display various charts based on the DataFrame using unique keys.
-    This logic is taken from the second code.
-    """
+    """Display various charts based on the DataFrame using unique keys."""
     if len(df.columns) >= 2:
         all_cols = list(df.columns)
 
@@ -201,12 +298,11 @@ def create_visualization_with_tabs(df: pd.DataFrame, sql_statement: str, data_so
             source_text = " • ".join(data_sources)
             st.info(f"📊 **Data Sources:** {source_text}")
         
-        # Display SQL query
-        # st.markdown("**Generated SQL:**")
-        # st.code(sql_statement, language="sql")
-        
         if not df.empty:
-            # st.success("✅ Dremio executed successfully")
+            # Success message with animation
+            st.markdown('<div class="scroll-to-bottom">', unsafe_allow_html=True)
+            st.success("✅ Data retrieved successfully!")
+            
             tab1, tab2 = st.tabs(["Data 📄", "Chart 📉"])
             
             with tab1:
@@ -217,6 +313,18 @@ def create_visualization_with_tabs(df: pd.DataFrame, sql_statement: str, data_so
                 # Use a stable hash from SQL statement as key
                 sql_hash = hashlib.md5(sql_statement.encode()).hexdigest()[:8]
                 display_charts_tab(df, sql_hash)
+            
+            st.markdown('</div>', unsafe_allow_html=True)
+            
+            # Auto-scroll to the data section
+            st.markdown("""
+            <script>
+                setTimeout(function() {
+                    window.scrollTo(0, document.body.scrollHeight);
+                }, 500);
+            </script>
+            """, unsafe_allow_html=True)
+            
         else:
             st.warning("⚠️ No data returned from Dremio.")
             
@@ -283,6 +391,7 @@ def process_user_question(question: str):
     """Process user question and generate response."""
     try:
         st.session_state.processing = True
+        st.session_state.loading_start_time = time.time()
         
         # Add user message to chat
         st.session_state.messages.append({
@@ -295,55 +404,63 @@ def process_user_question(question: str):
         with st.chat_message("user"):
             st.markdown(question)
         
-        # Get AI response
-        with st.spinner("🤔 Analyzing your question..."):
-            response_content, error = call_cortex_analyst_procedure(question)
-            
-            if error:
-                raise Exception(f"Cortex Analyst Error: {error}")
-            
-            if not response_content or not isinstance(response_content, dict):
-                raise Exception("❌ Invalid or empty response from Cortex Analyst")
-            
-            # Display assistant response
-            with st.chat_message("assistant"):
-                # Display text response
-                text_content = extract_text_from_response(response_content)
-                if text_content:
-                    st.markdown(text_content)
+        # Create placeholder for loading messages
+        loading_placeholder = st.empty()
+        
+        # Start dynamic loading display
+        with loading_placeholder:
+            with st.spinner("🤔 Analyzing your question..."):
+                # Get AI response
+                response_content, error = call_cortex_analyst_procedure(question)
                 
-                # Extract and execute SQL if present
-                sql_statement = extract_sql_from_response(response_content)
-                if sql_statement:
-                    # Execute SQL and create visualization
-                    with st.spinner("🔄 Executing query and creating visualization..."):
-                        df, sql_error = call_dremio_data_procedure(sql_statement)
+                if error:
+                    raise Exception(f"Cortex Analyst Error: {error}")
+                
+                if not response_content or not isinstance(response_content, dict):
+                    raise Exception("❌ Invalid or empty response from Cortex Analyst")
+        
+        # Clear loading placeholder
+        loading_placeholder.empty()
+        
+        # Display assistant response
+        with st.chat_message("assistant"):
+            # Display text response
+            text_content = extract_text_from_response(response_content)
+            if text_content:
+                st.markdown(text_content)
+            
+            # Extract and execute SQL if present
+            sql_statement = extract_sql_from_response(response_content)
+            if sql_statement:
+                # Show another loading message for SQL execution
+                with st.spinner("🔄 Executing query and creating visualization..."):
+                    df, sql_error = call_dremio_data_procedure(sql_statement)
+                    
+                    if df is not None:
+                        # Identify data sources
+                        data_sources = identify_data_sources_from_sql(sql_statement)
                         
-                        if df is not None:
-                            # Identify data sources
-                            data_sources = identify_data_sources_from_sql(sql_statement)
-                            
-                            # Create visualization with tabs
-                            create_visualization_with_tabs(df, sql_statement, data_sources)
-                            
-                        elif sql_error:
-                            st.error(f"❌ **SQL Execution Error:** {sql_error}")
-                        else:
-                            st.info("ℹ️ Query executed successfully but returned no data.")
-                
-                # Display suggestions
-                suggestions = extract_suggestions_from_response(response_content)
-                if suggestions:
-                    display_suggestions(suggestions, f"msg_{len(st.session_state.messages)}")
+                        # Create visualization with tabs
+                        create_visualization_with_tabs(df, sql_statement, data_sources)
+                        
+                    elif sql_error:
+                        st.error(f"❌ **SQL Execution Error:** {sql_error}")
+                    else:
+                        st.info("ℹ️ Query executed successfully but returned no data.")
             
-            # Add assistant message to chat history
-            st.session_state.messages.append({
-                "role": "assistant",
-                "content": response_content,
-                "timestamp": datetime.now(),
-                "message_id": f"msg_{len(st.session_state.messages)}"
-            })
-            
+            # Display suggestions
+            suggestions = extract_suggestions_from_response(response_content)
+            if suggestions:
+                display_suggestions(suggestions, f"msg_{len(st.session_state.messages)}")
+        
+        # Add assistant message to chat history
+        st.session_state.messages.append({
+            "role": "assistant",
+            "content": response_content,
+            "timestamp": datetime.now(),
+            "message_id": f"msg_{len(st.session_state.messages)}"
+        })
+        
     except Exception as e:
         error_message = f"❌ Error: {str(e)}"
         st.error(error_message)
@@ -358,35 +475,38 @@ def process_user_question(question: str):
         
     finally:
         st.session_state.processing = False
+        st.session_state.loading_start_time = None
 
 def send_welcome_message():
     """Send welcome message to get initial suggestions."""
     if not st.session_state.chat_initialized:
-        welcome_query = "What questions can I ask? Help me get started."
-        response_content, error = call_cortex_analyst_procedure(welcome_query)
-        
-        if response_content and not error:
-            # Store welcome message
-            st.session_state.messages.append({
-                "role": "assistant",
-                "content": response_content,
-                "timestamp": datetime.now(),
-                "message_id": "welcome"
-            })
+        # Show initial loading
+        with st.spinner("🚀 Initializing chat assistant..."):
+            welcome_query = "What questions can I ask? Help me get started."
+            response_content, error = call_cortex_analyst_procedure(welcome_query)
+            
+            if response_content and not error:
+                # Store welcome message
+                st.session_state.messages.append({
+                    "role": "assistant",
+                    "content": response_content,
+                    "timestamp": datetime.now(),
+                    "message_id": "welcome"
+                })
         
         st.session_state.chat_initialized = True
 
 def render_chat_interface():
     """Render the main chat interface."""
     # Handle pending question first
-    if st.session_state.get("pending_question"):
+    if st.session_state.get("pending_question") and not st.session_state.processing:
         question = st.session_state.pending_question
         st.session_state.pending_question = None
         process_user_question(question)
         st.rerun()
     
     # Handle active suggestion
-    if st.session_state.active_suggestion:
+    if st.session_state.active_suggestion and not st.session_state.processing:
         question = st.session_state.active_suggestion
         st.session_state.active_suggestion = None
         st.session_state.pending_question = question
@@ -396,7 +516,7 @@ def render_chat_interface():
     st.title("🤖 NLP-Based Dashboard's with Data")
     st.markdown("Let's get started, Ask questions about your data in natural language!")
     
-    # Display existing chat messages (except the current processing one)
+    # Display existing chat messages
     for i, message in enumerate(st.session_state.messages):
         message_id = message.get("message_id", f"msg_{i}")
         
@@ -416,7 +536,7 @@ def render_chat_interface():
                 # Extract and show SQL + visualization if present
                 sql_statement = extract_sql_from_response(response_content)
                 if sql_statement:
-                    # Re-execute query for historical messages (cached in real implementation)
+                    # Re-execute query for historical messages (in production, consider caching)
                     df, sql_error = call_dremio_data_procedure(sql_statement)
                     
                     if df is not None and not df.empty:
@@ -430,11 +550,19 @@ def render_chat_interface():
                 if suggestions:
                     display_suggestions(suggestions, f"msg_{i}")
     
-    # Chat input
-    question = st.chat_input("Ask me anything about your data...", disabled=st.session_state.processing)
-    if question:
+    # Chat input - disabled during processing
+    question = st.chat_input(
+        "Ask me anything about your data..." if not st.session_state.processing else "Processing your request...", 
+        disabled=st.session_state.processing
+    )
+    
+    if question and not st.session_state.processing:
         st.session_state.pending_question = question
         st.rerun()
+    
+    # Show processing status if active
+    if st.session_state.processing:
+        st.info("🔄 Processing your request... Please wait.")
 
 def main():
     """Main Streamlit application."""
@@ -447,34 +575,30 @@ def main():
     # Render chat interface
     render_chat_interface()
     
-    # Sidebar with chat controls
-    # with st.sidebar:
-    #     st.header("🛠️ Chat Controls")
+    # Optional: Add a clear chat button in the sidebar
+    with st.sidebar:
+        st.header("🛠️ Chat Controls")
         
-    #     if st.button("🗑️ Clear Chat History", use_container_width=True):
-    #         st.session_state.messages = []
-    #         st.session_state.chat_initialized = False
-    #         st.rerun()
+        if st.button("🗑️ Clear Chat History", use_container_width=True, disabled=st.session_state.processing):
+            st.session_state.messages = []
+            st.session_state.chat_initialized = False
+            st.rerun()
         
-    #     if st.button("🔄 Reset Welcome", use_container_width=True):
-    #         st.session_state.messages = []
-    #         st.session_state.chat_initialized = False
-    #         st.rerun()
+        st.markdown("---")
+        st.markdown("### 📊 Features")
+        st.markdown("""
+        - 💬 Natural language queries
+        - 📈 Interactive chart dashboard  
+        - 🔍 SQL query inspection
+        - 💡 Smart follow-up suggestions
+        - 🎯 Multiple chart types with Altair
+        - ⚡ Dynamic loading indicators
+        """)
         
-    #     st.markdown("---")
-    #     st.markdown("### 📊 Features")
-    #     st.markdown("""
-    #     - 💬 Natural language queries
-    #     - 📈 Interactive chart dashboard  
-    #     - 🔍 SQL query inspection
-    #     - 💡 Smart follow-up suggestions
-    #     - 🎯 Multiple chart types with Altair
-    #     """)
-        
-    #     if st.session_state.messages:
-    #         st.markdown("---")
-    #         st.markdown(f"**Messages:** {len(st.session_state.messages)}")
-    #         st.markdown(f"**Last activity:** {datetime.now().strftime('%H:%M:%S')}")
+        if st.session_state.messages:
+            st.markdown("---")
+            st.markdown(f"**Messages:** {len(st.session_state.messages)}")
+            st.markdown(f"**Status:** {'Processing...' if st.session_state.processing else 'Ready'}")
 
 if __name__ == "__main__":
     main()
